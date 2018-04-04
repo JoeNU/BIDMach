@@ -2,7 +2,7 @@ package BIDMach.allreduce.binder
 
 import BIDMach.allreduce.binder.AllreduceBinder.{DataSink, DataSource}
 import BIDMach.models.Model
-import BIDMat.FMat
+import BIDMat.{FMat, IMat, Mat}
 
 
 /**
@@ -17,12 +17,18 @@ class ElasticAverageBinder(model: Model, alpha: Double) extends AllreduceBinder 
     var ret = 0
     model.modelmats.synchronized {
       for (mat <- model.modelmats) {
-        val fmat = FMat(mat)
-        ret += fmat.length
+        ret += mat.length
       }
     }
     ret
   }
+
+  lazy val tmpUpdateMats: Array[FMat] = model.modelmats.map(m => FMat.make(m.dims))
+
+  lazy val countMats: Array[IMat] = model.modelmats.map(m => IMat.make(m.dims))
+
+  lazy val diffMats: Array[Mat] = model.modelmats.map(m => IMat.make(m.dims))
+
 
   override def dataSource: DataSource = inputRequest => {
 
@@ -68,12 +74,26 @@ class ElasticAverageBinder(model: Model, alpha: Double) extends AllreduceBinder 
     var current = totalDataSize
     var i = model.modelmats.length - 1
 
+    // trasnfer to fmat so that we can just add average
+
+
+
     while (i >= 0) {
       val mat = model.modelmats(i)
       val contentData = FMat(mat).contents.data
+      val contentLength = contentData.length
+
+      val tmpMat = tmpUpdateMats(i)
+      val countMat = countMats(i)
+
       current -= contentData.length
-      //suppose averaged data is given
-      System.arraycopy(data, current, contentData, 0, contentData.length)
+      System.arraycopy(data, current, tmpMat.data, 0, contentLength)
+      System.arraycopy(count, current, countMat.data, 0, contentLength)
+
+      tmpMat ~ tmpMat / countMat
+      diffMats(i) = tmpMat - mat
+      diffMats(i) ~ diffMats(i) *@ alpha
+      mat ~ mat + diffMats(i)
       i -= 1
     }
 
