@@ -23,13 +23,6 @@ class ElasticAverageBinder(model: Model, alpha: Double) extends AllreduceBinder 
     ret
   }
 
-  lazy val tmpUpdateMats: Array[FMat] = model.modelmats.map(m => FMat.make(m.dims))
-
-  lazy val countMats: Array[IMat] = model.modelmats.map(m => IMat.make(m.dims))
-
-  lazy val diffMats: Array[Mat] = model.modelmats.map(m => IMat.make(m.dims))
-
-
   override def dataSource: DataSource = inputRequest => {
 
     println(s"--Dumping model data at ${inputRequest.iteration}--")
@@ -76,27 +69,20 @@ class ElasticAverageBinder(model: Model, alpha: Double) extends AllreduceBinder 
 
     // trasnfer to fmat so that we can just add average
 
-
-
     while (i >= 0) {
       val mat = model.modelmats(i)
-      val contentData = FMat(mat).contents.data
-      val contentLength = contentData.length
-
-      val tmpMat = tmpUpdateMats(i)
-      val countMat = countMats(i)
-
-      current -= contentData.length
-      System.arraycopy(data, current, tmpMat.data, 0, contentLength)
-      System.arraycopy(count, current, countMat.data, 0, contentLength)
-
-      tmpMat ~ tmpMat / countMat
-      diffMats(i) = tmpMat - mat
-      diffMats(i) ~ diffMats(i) *@ alpha
-      mat ~ mat + diffMats(i)
+      val content = FMat(mat).data
+      val contentLength = mat.length
+      var j = 0
+      current -= contentLength
+      while (j < contentLength) {
+        val avgVal = data(current + j) / count(current + j)
+        val diff = avgVal - content(j)
+        mat.update(j, content(j) + alpha * diff )
+        j += 1
+      }
       i -= 1
     }
-
     assert(current == 0, "current should be zero after iteration")
 
   }
